@@ -13,64 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "tensorflow/compiler/xla/ptr_util.h"
 #include "tensorflow/compiler/xla/service/gpu/infeed_manager.h"
-#include "tensorflow/core/platform/logging.h"
 
-namespace se = ::perftools::gputools;
+#include "absl/memory/memory.h"
 
 namespace xla {
 namespace gpu {
 
-InfeedManager::InfeedManager()
-    : current_buffer_(nullptr),
-      host_to_device_executor_(nullptr) {}
-
-void InfeedManager::Reset() {
-  tensorflow::mutex_lock l(mu_);
-  CHECK(!current_buffer_);
-  for (auto buffer : enqueued_buffer_) {
-    buffer->Done();
-  }
-  enqueued_buffer_.clear();
-}
-
-void InfeedManager::EnqueueBuffer(InfeedBuffer* buffer) {
-  tensorflow::mutex_lock l(mu_);
-  bool was_empty = enqueued_buffer_.empty();
-  enqueued_buffer_.push_back(buffer);
-  if (was_empty) {
-    // This has the potential to suffer from the notified thread
-    // immediately trying and failing to acquire mu_, but seems
-    // preferable to the alternative of notifying outside the lock
-    // on every enqueue.
-    cv_.notify_one();
-  }
-}
-
-InfeedBuffer* InfeedManager::BlockingDequeueBuffer() {
-  tensorflow::mutex_lock l(mu_);
-  while (enqueued_buffer_.empty()) {
-    cv_.wait(l);
-  }
-  CHECK(!current_buffer_);
-  current_buffer_ = enqueued_buffer_.front();
-  enqueued_buffer_.pop_front();
-  return current_buffer_;
-}
-
-void InfeedManager::ReleaseCurrentBuffer(se::DeviceMemoryBase* device_memory) {
-  tensorflow::mutex_lock l(mu_);
-  CHECK(current_buffer_);
-  CHECK(device_memory->IsSameAs(*current_buffer_->device_memory()));
-  current_buffer_->Done();
-  current_buffer_ = nullptr;
-}
-
 se::Stream* InfeedManager::GetStream(se::StreamExecutor* executor) {
+  tensorflow::mutex_lock l(host_to_device_stream_mu_);
   if (host_to_device_executor_ == nullptr) {
     host_to_device_executor_ = executor;
-    host_to_device_stream_ = MakeUnique<se::Stream>(executor);
+    host_to_device_stream_ = absl::make_unique<se::Stream>(executor);
     host_to_device_stream_->Init();
   }
 

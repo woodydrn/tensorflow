@@ -62,7 +62,7 @@ class SparseToDense : public OpKernel {
     // output_shape
     const Tensor& output_shape = c->input(1);
     OP_REQUIRES(
-        c, IsLegacyVector(output_shape.shape()),
+        c, TensorShapeUtils::IsVector(output_shape.shape()),
         errors::InvalidArgument("output_shape should be a vector, got shape ",
                                 output_shape.shape().DebugString()));
     OP_REQUIRES(c, output_shape.NumElements() == num_dims,
@@ -73,8 +73,9 @@ class SparseToDense : public OpKernel {
     // sparse_values
     const Tensor& sparse_values = c->input(2);
     const int64 num_values = sparse_values.NumElements();
-    OP_REQUIRES(c, sparse_values.dims() == 0 ||
-                       (sparse_values.dims() == 1 && num_values == num_elems),
+    OP_REQUIRES(c,
+                sparse_values.dims() == 0 ||
+                    (sparse_values.dims() == 1 && num_values == num_elems),
                 errors::InvalidArgument("sparse_values has incorrect shape ",
                                         sparse_values.shape().DebugString(),
                                         ", should be [] or [", num_elems, "]"));
@@ -118,8 +119,10 @@ class SparseToDense : public OpKernel {
     // Assume SparseTensor is lexicographically sorted.
     gtl::InlinedVector<int64, 8> order(output->shape().dims());
     std::iota(order.begin(), order.end(), 0);
-    sparse::SparseTensor st(indices_shaped, sparse_values_b, output->shape(),
-                            order);
+    sparse::SparseTensor st;
+    OP_REQUIRES_OK(c,
+                   sparse::SparseTensor::Create(indices_shaped, sparse_values_b,
+                                                output->shape(), order, &st));
 
     if (validate_indices_) {
       OP_REQUIRES_OK(c, st.IndicesValid());
@@ -149,7 +152,7 @@ class SparseToDense : public OpKernel {
 
 TF_CALL_REAL_NUMBER_TYPES(REGISTER_KERNELS_ALL);
 REGISTER_KERNELS_ALL(bool);
-REGISTER_KERNELS_ALL(string);
+REGISTER_KERNELS_ALL(tstring);
 
 #undef REGISTER_KERNELS_ALL
 #undef REGISTER_KERNELS

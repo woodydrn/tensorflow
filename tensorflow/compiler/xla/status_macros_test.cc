@@ -63,7 +63,7 @@ StatusOr<int> CreateIntUnsuccessfully() {
 }
 
 TEST(StatusMacros, AssignOrAssertOnOK) {
-  TF_ASSIGN_OR_ASSERT_OK(int result, CreateIntSuccessfully());
+  TF_ASSERT_OK_AND_ASSIGN(int result, CreateIntSuccessfully());
   EXPECT_EQ(42, result);
 }
 
@@ -90,7 +90,7 @@ TEST(StatusMacros, ReturnIfErrorOnError) {
   EXPECT_EQ(rc.status().code(), tensorflow::error::INTERNAL);
 }
 
-TEST(StatusMacros, AssignOrReturnSuccessufully) {
+TEST(StatusMacros, AssignOrReturnSuccessfully) {
   Status status = []() {
     TF_ASSIGN_OR_RETURN(int value, CreateIntSuccessfully());
     EXPECT_EQ(value, 42);

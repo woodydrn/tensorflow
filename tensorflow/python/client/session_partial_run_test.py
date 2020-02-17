@@ -22,36 +22,19 @@ from __future__ import print_function
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
 from tensorflow.python.client import session
-from tensorflow.python.framework import common_shapes
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
-from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.platform import googletest
 from tensorflow.python.training import server_lib
 
-ops._USE_C_API = True
-
-# NOTE(mrry): Dummy shape registration for ops used in the tests, since they
-# don't have C++ op registrations on which to attach C++ shape fns.
-ops.RegisterShape('ConstructionFails')(common_shapes.unknown_shape)
-
 
 class PartialRunTest(test_util.TensorFlowTestCase):
 
-  def setUp(self):
-    # Partial runs don't work with C API
-    ops._USE_C_API = False
-    super(PartialRunTest, self).setUp()
-
-  def tearDown(self):
-    ops._USE_C_API = True
-    super(PartialRunTest, self).tearDown()
-
-  def runTestPartialRun(self, sess):
+  def RunTestPartialRun(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -73,7 +56,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
     res = sess.partial_run(h2, r2, feed_dict={c: temp})
     self.assertEqual(162, res)
 
-  def runTestPartialRunIncomplete(self, sess):
+  def RunTestPartialRunIncomplete(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -84,7 +67,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
     res = sess.partial_run(h, r1, feed_dict={a: 1, b: 2})
     self.assertEqual(3, res)
 
-  def runTestConcurrentPartialRun(self, sess):
+  def RunTestConcurrentPartialRun(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -101,7 +84,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
     res = sess.partial_run(h2, r2, feed_dict={c: 7})
     self.assertEqual(462, res)
 
-  def runTestManyPartialRun(self, sess):
+  def RunTestManyPartialRun(self, sess):
     steps = 200
     inputs = []
     outputs = []
@@ -123,16 +106,16 @@ class PartialRunTest(test_util.TensorFlowTestCase):
     self.assertEqual(steps, len(res))
     self.assertEqual(2.0, res[-1])
 
-  def runTestRunAndPartialRun(self, sess):
+  def RunTestRunAndPartialRun(self, sess):
     a = constant_op.constant(2.0, dtypes.float32)
     b = a * 2
     c = b * 3
-    r1 = sess.run([b, c])
+    r1 = self.evaluate([b, c])
     h = sess.partial_run_setup([b, c], [])
     r2 = sess.partial_run(h, [b, c])
     self.assertEqual(r1, r2)
 
-  def runTestPartialRunMissingPlaceholderFeedException(self, sess):
+  def RunTestPartialRunMissingPlaceholderFeedException(self, sess):
     x = array_ops.placeholder(dtypes.float32, shape=())
     fetches = [x * 2, x * 3]
     handle = sess.partial_run_setup(fetches=fetches, feeds=[])
@@ -140,7 +123,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
                                  'You must feed a value for placeholder'):
       sess.partial_run(handle, fetches[0])
 
-  def runTestPartialRunUnspecifiedFeed(self, sess):
+  def RunTestPartialRunUnspecifiedFeed(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -151,7 +134,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
                                  'was not specified in partial_run_setup.$'):
       sess.partial_run(h, r1, feed_dict={a: 1, b: 2, c: 3})
 
-  def runTestPartialRunUnspecifiedFetch(self, sess):
+  def RunTestPartialRunUnspecifiedFetch(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -163,7 +146,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
                                  'was not specified in partial_run_setup.$'):
       sess.partial_run(h, r2, feed_dict={a: 1, c: 3})
 
-  def runTestPartialRunAlreadyFed(self, sess):
+  def RunTestPartialRunAlreadyFed(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -176,7 +159,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
                                  'has already been fed.$'):
       sess.partial_run(h, r2, feed_dict={a: 1, c: 3})
 
-  def runTestPartialRunAlreadyFetched(self, sess):
+  def RunTestPartialRunAlreadyFetched(self, sess):
     a = array_ops.placeholder(dtypes.float32, shape=[])
     b = array_ops.placeholder(dtypes.float32, shape=[])
     c = array_ops.placeholder(dtypes.float32, shape=[])
@@ -189,7 +172,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
                                  'has already been fetched.$'):
       sess.partial_run(h, r1, feed_dict={c: 3})
 
-  def runTestPartialRunEmptyFetches(self, sess):
+  def RunTestPartialRunEmptyFetches(self, sess):
     a = array_ops.placeholder(dtypes.float32)
     b = a * 2.0
 
@@ -198,6 +181,7 @@ class PartialRunTest(test_util.TensorFlowTestCase):
     r = sess.partial_run(h, [b], {})
     self.assertEqual([6.0], r)
 
+  @test_util.run_deprecated_v1
   def testInvalidPartialRunSetup(self):
     sess = session.Session()
     x = array_ops.placeholder(dtypes.float32, shape=[])
@@ -206,83 +190,114 @@ class PartialRunTest(test_util.TensorFlowTestCase):
         'specify at least one target to fetch or execute.'):
       sess.partial_run_setup(fetches=[], feeds=[x])
 
+  @test_util.run_deprecated_v1
+  def testPartialRunSetupNoFeedsPassed(self):
+    sess = session.Session()
+    r1 = constant_op.constant([6.0])
+
+    h = sess.partial_run_setup([r1])
+    result1 = sess.partial_run(h, r1)
+    self.assertEqual([6.0], result1)
+
+  @test_util.run_deprecated_v1
   def testPartialRunDirect(self):
-    self.runTestPartialRun(session.Session())
+    self.RunTestPartialRun(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunIncompleteDirect(self):
-    self.runTestPartialRunIncomplete(session.Session())
+    self.RunTestPartialRunIncomplete(session.Session())
 
+  @test_util.run_deprecated_v1
   def testConcurrentPartialRunDirect(self):
-    self.runTestConcurrentPartialRun(session.Session())
+    self.RunTestConcurrentPartialRun(session.Session())
 
+  @test_util.run_deprecated_v1
   def testManyPartialRunDirect(self):
-    self.runTestManyPartialRun(session.Session())
+    self.RunTestManyPartialRun(session.Session())
 
+  @test_util.run_deprecated_v1
   def testRunAndPartialRunDirect(self):
-    self.runTestRunAndPartialRun(session.Session())
+    self.RunTestRunAndPartialRun(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunMissingPlaceholderFeedExceptionDirect(self):
-    self.runTestPartialRunMissingPlaceholderFeedException(session.Session())
+    self.RunTestPartialRunMissingPlaceholderFeedException(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunUnspecifiedFeedDirect(self):
-    self.runTestPartialRunUnspecifiedFeed(session.Session())
+    self.RunTestPartialRunUnspecifiedFeed(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunUnspecifiedFetchDirect(self):
-    self.runTestPartialRunUnspecifiedFetch(session.Session())
+    self.RunTestPartialRunUnspecifiedFetch(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunAlreadyFedDirect(self):
-    self.runTestPartialRunAlreadyFed(session.Session())
+    self.RunTestPartialRunAlreadyFed(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunAlreadyFetchedDirect(self):
-    self.runTestPartialRunAlreadyFetched(session.Session())
+    self.RunTestPartialRunAlreadyFetched(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunEmptyFetchesDirect(self):
-    self.runTestPartialRunEmptyFetches(session.Session())
+    self.RunTestPartialRunEmptyFetches(session.Session())
 
+  @test_util.run_deprecated_v1
   def testPartialRunDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRun(session.Session(server.target))
+    self.RunTestPartialRun(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunIncompleteDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunIncomplete(session.Session(server.target))
+    self.RunTestPartialRunIncomplete(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testConcurrentPartialRunDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestConcurrentPartialRun(session.Session(server.target))
+    self.RunTestConcurrentPartialRun(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testManyPartialRunDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestManyPartialRun(session.Session(server.target))
+    self.RunTestManyPartialRun(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testRunAndPartialRunDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestRunAndPartialRun(session.Session(server.target))
+    self.RunTestRunAndPartialRun(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunMissingPlaceholderFeedExceptionDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunMissingPlaceholderFeedException(
+    self.RunTestPartialRunMissingPlaceholderFeedException(
         session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunUnspecifiedFeedDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunUnspecifiedFeed(session.Session(server.target))
+    self.RunTestPartialRunUnspecifiedFeed(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunUnspecifiedFetchDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunUnspecifiedFetch(session.Session(server.target))
+    self.RunTestPartialRunUnspecifiedFetch(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunAlreadyFedDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunAlreadyFed(session.Session(server.target))
+    self.RunTestPartialRunAlreadyFed(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunAlreadyFetchedDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunAlreadyFetched(session.Session(server.target))
+    self.RunTestPartialRunAlreadyFetched(session.Session(server.target))
 
+  @test_util.run_deprecated_v1
   def testPartialRunEmptyFetchesDist(self):
     server = server_lib.Server.create_local_server()
-    self.runTestPartialRunEmptyFetches(session.Session(server.target))
+    self.RunTestPartialRunEmptyFetches(session.Session(server.target))
 
 
 if __name__ == '__main__':

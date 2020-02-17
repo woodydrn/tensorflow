@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-
 """Tests for tensorflow.python.client.session.Session's ClusterSpec Propagation.
 
 These tests exercise the ClusterSpec Propagation capabilities of distributed
@@ -27,9 +26,9 @@ import numpy as np
 from tensorflow.core.protobuf import cluster_pb2
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.client import session
-from tensorflow.python.framework import common_shapes
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
@@ -39,18 +38,12 @@ from tensorflow.python.ops import resource_variable_ops  # pylint: disable=unuse
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import googletest
+from tensorflow.python.platform import test
 from tensorflow.python.training import server_lib
-
-ops._USE_C_API = True
-
-# NOTE(mrry): Dummy shape registration for ops used in the tests, since they
-# don't have C++ op registrations on which to attach C++ shape fns.
-ops.RegisterShape('ConstructionFails')(common_shapes.unknown_shape)
 
 
 class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
 
-  @test_util.disable_c_api  # Operation._set_device doesn't work with C API
   def testClusterSpecPropagationSimple(self):
     server1 = server_lib.Server.create_local_server()
     server2 = server_lib.Server.create_local_server()
@@ -63,10 +56,9 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
 
     const = constant_op.constant(17)
     sess = session.Session(server1.target, config=config)
-    output = sess.run(const)
+    output = self.evaluate(const)
     self.assertEqual(17, output)
 
-  @test_util.disable_c_api  # Operation._set_device doesn't work with C API
   def testClusterSpecPropagationWorker2Placement(self):
     server1 = server_lib.Server.create_local_server()
     server2 = server_lib.Server.create_local_server()
@@ -78,6 +70,51 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
     config = config_pb2.ConfigProto(cluster_def=cluster_def)
 
     with ops.Graph().as_default() as g, ops.device('/job:worker/task:1'):
+      with ops.device('/cpu:0'):
+        const = constant_op.constant(17)
+    sess = session.Session(server1.target, config=config, graph=g)
+    run_options = config_pb2.RunOptions(
+        trace_level=config_pb2.RunOptions.FULL_TRACE)
+    run_metadata = config_pb2.RunMetadata()
+    output = sess.run(const, options=run_options, run_metadata=run_metadata)
+    self.assertEqual(17, output)
+    self.assertEqual(1,
+                     len([
+                         node_stats
+                         for dev_stats in run_metadata.step_stats.dev_stats
+                         for node_stats in dev_stats.node_stats
+                         if '/job:worker/replica:0/task:1/device:CPU:0' ==
+                         dev_stats.device and 'Const' == node_stats.node_name
+                     ]))
+
+  def testClusterSpecPropagationWorker1Placement(self):
+    server1 = server_lib.Server.create_local_server()
+    server2 = server_lib.Server.create_local_server()
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'worker'
+    job.tasks[0] = server1.target[len('grpc://'):]
+    job.tasks[1] = server2.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+
+    with ops.Graph().as_default() as g, ops.device('/job:worker/task:0'):
+      const = constant_op.constant(17)
+    with session.Session(server1.target, config=config, graph=g):
+      output = self.evaluate(const)
+    self.assertEqual(17, output)
+
+  def testCanonicalDeviceNames(self):
+    server1 = server_lib.Server.create_local_server()
+    server2 = server_lib.Server.create_local_server()
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'worker'
+    job.tasks[0] = server1.target[len('grpc://'):]
+    job.tasks[1] = server2.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+
+    with ops.Graph().as_default() as g, ops.device(
+        '/job:worker/task:1/device:CPU:0'):
       const = constant_op.constant(17)
     sess = session.Session(server1.target, config=config, graph=g)
     run_options = config_pb2.RunOptions(
@@ -94,8 +131,81 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
                          dev_stats.device and 'Const' == node_stats.node_name
                      ]))
 
-  @test_util.disable_c_api  # Operation._set_device doesn't work with C API
-  def testClusterSpecPropagationWorker1Placement(self):
+  def testFullDeviceNames(self):
+    server1 = server_lib.Server.create_local_server()
+    server2 = server_lib.Server.create_local_server()
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'renamed_worker'
+    job.tasks[0] = server1.target[len('grpc://'):]
+    job.tasks[1] = server2.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+
+    with ops.Graph().as_default() as g, ops.device(
+        '/job:renamed_worker/replica:0/task:1/device:CPU:0'):
+      const = constant_op.constant(17)
+    sess = session.Session(server1.target, config=config, graph=g)
+    run_options = config_pb2.RunOptions(
+        trace_level=config_pb2.RunOptions.FULL_TRACE)
+    run_metadata = config_pb2.RunMetadata()
+    output = sess.run(const, options=run_options, run_metadata=run_metadata)
+    self.assertEqual(17, output)
+    self.assertEqual(1,
+                     len([
+                         node_stats
+                         for dev_stats in run_metadata.step_stats.dev_stats
+                         for node_stats in dev_stats.node_stats
+                         if '/job:renamed_worker/replica:0/task:1/device:CPU:0'
+                         == dev_stats.device and 'Const' == node_stats.node_name
+                     ]))
+
+  def testMultipleLocalDevices(self):
+    # Note: CPU->CPU transfers have a fast-path in
+    # BaseRemoteRendezvous::SameWorkerRecvDone that means the test doesn't
+    # actually capture the motivating bug unless run on a GPU machine.
+    #
+    # Example error message (before bugfix -- line breaks added because  lint):
+    #
+    # W0718 17:14:41.521534  190121 device_mgr.cc:107] Unknown device:
+    #     /job:worker/replica:0/task:0/device:CPU:0 all devices:
+    #     /job:local/replica:0/task:0/device:GPU:0,
+    #     /job:local/replica:0/task:0/device:GPU:0,
+    #     /job:local/replica:0/task:0/cpu:1, CPU:0, GPU:0,
+    #     /job:local/replica:0/task:0/device:CPU:1,
+    #     /job:local/replica:0/task:0/device:CPU:0, CPU:1,
+    #     /job:local/replica:0/task:0/cpu:0
+    server_config = config_pb2.ConfigProto(device_count={'CPU': 2})
+    server1 = server_lib.Server.create_local_server(config=server_config)
+    server2 = server_lib.Server.create_local_server(config=server_config)
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'worker'
+    job.tasks[0] = server1.target[len('grpc://'):]
+    job.tasks[1] = server2.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+
+    with ops.Graph().as_default() as g:
+      with ops.device('/job:worker/task:1/cpu:1'):
+        input1 = constant_op.constant(17, dtypes.float32)
+      with ops.device('/job:worker/task:0/cpu:1'):
+        input2 = constant_op.constant(3, dtypes.float32)
+      with ops.device('/job:worker/task:1/cpu:0'):
+        sum1 = input1 + input2
+
+      if test.is_gpu_available():
+        device_str = '/job:worker/task:0/device:GPU:0'
+      else:
+        device_str = '/job:worker/task:0/cpu:1'
+      with ops.device(device_str):
+        sum2 = input2 + input1
+
+      with ops.device('/job:worker/task:0/cpu:0'):
+        sum3 = sum1 + sum2
+    with session.Session(server1.target, config=config, graph=g):
+      output = self.evaluate(sum3)
+    self.assertEqual(40, output)
+
+  def testLegacyDeviceNames(self):
     server1 = server_lib.Server.create_local_server()
     server2 = server_lib.Server.create_local_server()
     cluster_def = cluster_pb2.ClusterDef()
@@ -105,13 +215,23 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
     job.tasks[1] = server2.target[len('grpc://'):]
     config = config_pb2.ConfigProto(cluster_def=cluster_def)
 
-    with ops.Graph().as_default() as g, ops.device('/job:worker/task:0'):
+    with ops.Graph().as_default() as g, ops.device('/job:worker/task:1/cpu:0'):
       const = constant_op.constant(17)
     sess = session.Session(server1.target, config=config, graph=g)
-    output = sess.run(const)
+    run_options = config_pb2.RunOptions(
+        trace_level=config_pb2.RunOptions.FULL_TRACE)
+    run_metadata = config_pb2.RunMetadata()
+    output = sess.run(const, options=run_options, run_metadata=run_metadata)
     self.assertEqual(17, output)
+    self.assertEqual(1,
+                     len([
+                         node_stats
+                         for dev_stats in run_metadata.step_stats.dev_stats
+                         for node_stats in dev_stats.node_stats
+                         if '/job:worker/replica:0/task:1/device:CPU:0' ==
+                         dev_stats.device and 'Const' == node_stats.node_name
+                     ]))
 
-  @test_util.disable_c_api  # Operation._set_device doesn't work with C API
   def testClusterSpecPropagationThreeServers2Graphs(self):
     """Boots 3 servers, creates 2 sessions, ensures appropriate operations.
 
@@ -173,7 +293,6 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
     self.assertAllEqual(expected_ones, sess2.run(var2))
     self.assertAllEqual(expected_ones + expected_ones, sess1.run(var1))
 
-  @test_util.disable_c_api  # Operation._set_device doesn't work with C API
   def testClusterSpecPropagationThreeServers(self):
     """Boots 3 servers, creates 2 sessions, ensures appropriate operations.
 
@@ -228,7 +347,6 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
     self.assertAllEqual(expected_ones, sess2.run(var))
     self.assertAllEqual(expected_ones + expected_ones, sess1.run(var))
 
-  @test_util.disable_c_api  # Operation._set_device doesn't work with C API
   def testClusterSpecPropagationThreeServersOneCluster(self):
     """Boots 3 servers, ensures appropriate communication across workers.
 
@@ -292,7 +410,129 @@ class SessionClusterSpecPropagationTest(test_util.TensorFlowTestCase):
               node_stats.node_name.startswith('Const')
           ]), run_metadata)
 
-  @test_util.disable_c_api  # Partial runs don't work with C API
+  def testClusterSpecPropagationIsolation(self):
+    """Test that two sessions using ClusterSpec propagation are isolated."""
+    server = server_lib.Server.create_local_server()
+    init_value = array_ops.placeholder(dtypes.int32, shape=[])
+    v = variables.Variable(init_value)
+
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'worker'
+    job.tasks[0] = server.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+
+    sess1 = session.Session(server.target, config=config)
+    sess2 = session.Session(server.target, config=config)
+
+    # Initially, the variable is uninitialized in both sessions.
+    with self.assertRaises(errors.FailedPreconditionError):
+      sess1.run(v)
+    with self.assertRaises(errors.FailedPreconditionError):
+      sess2.run(v)
+
+    # An update in sess1 should be visible in sess1 only.
+    sess1.run(v.initializer, feed_dict={init_value: 37})
+    self.assertEqual(37, sess1.run(v))
+    with self.assertRaises(errors.FailedPreconditionError):
+      sess2.run(v)
+
+    # An update in sess2 should be visible in sess2 only.
+    sess2.run(v.initializer, feed_dict={init_value: 86})
+    self.assertEqual(37, sess1.run(v))
+    self.assertEqual(86, sess2.run(v))
+
+    # Closing sess2 has no effect on the state of sess1.
+    sess2.close()
+    self.assertEqual(37, sess1.run(v))
+
+    # Subsequent sessions will not see the state of existing sessions.
+    sess3 = session.Session(server.target, config=config)
+    self.assertEqual(37, sess1.run(v))
+    with self.assertRaises(errors.FailedPreconditionError):
+      sess3.run(v)
+
+  def testClusterSpecPropagationNonIsolation(self):
+    """Test that two sessions using ClusterSpec propagation shares state.
+
+    For example, the updated Variable value are visible among all worker
+    sessions registered in the same server.
+    """
+    server = server_lib.Server.create_local_server()
+    init_value = array_ops.placeholder(dtypes.int32, shape=[])
+    v = variables.Variable(init_value)
+
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'worker'
+    job.tasks[0] = server.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+    config.experimental.share_session_state_in_clusterspec_propagation = True
+
+    sess1 = session.Session(server.target, config=config)
+    sess2 = session.Session(server.target, config=config)
+
+    # Initially, the variable is uninitialized in both sessions.
+    with self.assertRaises(errors.FailedPreconditionError):
+      sess1.run(v)
+    with self.assertRaises(errors.FailedPreconditionError):
+      sess2.run(v)
+
+    # An update in sess1 should be visible in sess2.
+    sess1.run(v.initializer, feed_dict={init_value: 37})
+    self.assertEqual(37, sess1.run(v))
+    self.assertEqual(37, sess2.run(v))
+
+    # Closing sess2 has no effect on the state of sess1.
+    sess2.close()
+    self.assertEqual(37, sess1.run(v))
+
+    # Subsequent sessions should see the state of existing sessions.
+    sess3 = session.Session(server.target, config=config)
+    self.assertEqual(37, sess1.run(v))
+    self.assertEqual(37, sess3.run(v))
+
+  def testClusterSpecPropagationNonIsolation2Graphs(self):
+    """Creates 2 sessions with each own graph, ensures appropriate operations.
+
+    We ensure that variables on the workers shares state.
+    """
+    server = server_lib.Server.create_local_server()
+    cluster_def = cluster_pb2.ClusterDef()
+    job = cluster_def.job.add()
+    job.name = 'worker'
+    job.tasks[0] = server.target[len('grpc://'):]
+    config = config_pb2.ConfigProto(cluster_def=cluster_def)
+    config.experimental.share_session_state_in_clusterspec_propagation = True
+
+    with ops.Graph().as_default() as g1:
+      var1 = variables.Variable(array_ops.zeros([2]), name='var')
+      update_op1 = state_ops.assign_add(
+          var1, array_ops.ones([2]), name='var1_assign_add')
+      init1 = variables.global_variables_initializer()
+
+    with ops.Graph().as_default() as g2:
+      var2 = variables.Variable(array_ops.zeros([2]), name='var')
+      update_op2 = state_ops.assign_add(
+          var2, array_ops.ones([2]), name='var2_assign_add')
+
+    sess1 = session.Session(server.target, graph=g1, config=config)
+    sess2 = session.Session(server.target, graph=g2, config=config)
+
+    expected_zeros = np.zeros([2])
+    expected_ones = np.ones([2])
+
+    init1.run(session=sess1)
+    self.assertAllEqual(expected_zeros, sess1.run(var1))
+    self.assertAllEqual(expected_zeros, sess2.run(var2))
+
+    self.assertAllEqual(expected_ones, sess1.run(update_op1))
+    self.assertAllEqual(expected_ones, sess1.run(var1))
+    self.assertAllEqual(expected_ones, sess2.run(var2))
+    self.assertAllEqual(expected_ones + expected_ones, sess2.run(update_op2))
+    self.assertAllEqual(expected_ones + expected_ones, sess2.run(var2))
+    self.assertAllEqual(expected_ones + expected_ones, sess1.run(var1))
+
   def testClusterSpecPropagationPartialRun(self):
     """Test successful partial run with ClusterSpec propagation."""
     server1 = server_lib.Server.create_local_server()

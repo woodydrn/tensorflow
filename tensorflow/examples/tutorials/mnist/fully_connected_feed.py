@@ -20,7 +20,7 @@ from __future__ import print_function
 
 # pylint: disable=missing-docstring
 import argparse
-import os.path
+import os
 import sys
 import time
 
@@ -50,9 +50,9 @@ def placeholder_inputs(batch_size):
   # Note that the shapes of the placeholders match the shapes of the full
   # image and label tensors, except the first dimension is now batch_size
   # rather than the full size of the train or test data sets.
-  images_placeholder = tf.placeholder(tf.float32, shape=(batch_size,
-                                                         mnist.IMAGE_PIXELS))
-  labels_placeholder = tf.placeholder(tf.int32, shape=(batch_size))
+  images_placeholder = tf.compat.v1.placeholder(
+      tf.float32, shape=(batch_size, mnist.IMAGE_PIXELS))
+  labels_placeholder = tf.compat.v1.placeholder(tf.int32, shape=(batch_size))
   return images_placeholder, labels_placeholder
 
 
@@ -109,7 +109,7 @@ def do_eval(sess,
                                labels_placeholder)
     true_count += sess.run(eval_correct, feed_dict=feed_dict)
   precision = float(true_count) / num_examples
-  print('  Num examples: %d  Num correct: %d  Precision @ 1: %0.04f' %
+  print('Num examples: %d  Num correct: %d  Precision @ 1: %0.04f' %
         (num_examples, true_count, precision))
 
 
@@ -140,19 +140,19 @@ def run_training():
     eval_correct = mnist.evaluation(logits, labels_placeholder)
 
     # Build the summary Tensor based on the TF collection of Summaries.
-    summary = tf.summary.merge_all()
+    summary = tf.compat.v1.summary.merge_all()
 
     # Add the variable initializer Op.
-    init = tf.global_variables_initializer()
+    init = tf.compat.v1.global_variables_initializer()
 
     # Create a saver for writing training checkpoints.
-    saver = tf.train.Saver()
+    saver = tf.compat.v1.train.Saver()
 
     # Create a session for running Ops on the Graph.
-    sess = tf.Session()
+    sess = tf.compat.v1.Session()
 
     # Instantiate a SummaryWriter to output summaries and the Graph.
-    summary_writer = tf.summary.FileWriter(FLAGS.log_dir, sess.graph)
+    summary_writer = tf.compat.v1.summary.FileWriter(FLAGS.log_dir, sess.graph)
 
     # And then after everything is built:
 
@@ -216,9 +216,9 @@ def run_training():
 
 
 def main(_):
-  if tf.gfile.Exists(FLAGS.log_dir):
-    tf.gfile.DeleteRecursively(FLAGS.log_dir)
-  tf.gfile.MakeDirs(FLAGS.log_dir)
+  if tf.io.gfile.exists(FLAGS.log_dir):
+    tf.io.gfile.rmtree(FLAGS.log_dir)
+  tf.io.gfile.makedirs(FLAGS.log_dir)
   run_training()
 
 
@@ -257,13 +257,15 @@ if __name__ == '__main__':
   parser.add_argument(
       '--input_data_dir',
       type=str,
-      default='/tmp/tensorflow/mnist/input_data',
+      default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),
+                           'tensorflow/mnist/input_data'),
       help='Directory to put the input data.'
   )
   parser.add_argument(
       '--log_dir',
       type=str,
-      default='/tmp/tensorflow/mnist/logs/fully_connected_feed',
+      default=os.path.join(os.getenv('TEST_TMPDIR', '/tmp'),
+                           'tensorflow/mnist/logs/fully_connected_feed'),
       help='Directory to put the log data.'
   )
   parser.add_argument(
@@ -274,4 +276,4 @@ if __name__ == '__main__':
   )
 
   FLAGS, unparsed = parser.parse_known_args()
-  tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  tf.compat.v1.app.run(main=main, argv=[sys.argv[0]] + unparsed)

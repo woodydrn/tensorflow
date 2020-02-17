@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/core/distributed_runtime/tensor_coding.h"
 
+#include "tensorflow/core/framework/device_attributes.pb.h"
 #include "tensorflow/core/framework/device_base.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
@@ -119,12 +120,12 @@ class TensorResponseTest : public ::testing::Test {
     }
   }
   void DoTestForStrings(DataType dt) {
-    gtl::InlinedVector<string, 4> v;
+    gtl::InlinedVector<tstring, 4> v;
     LOG(ERROR) << "DT: string";
     for (int elems = 0; elems <= 10000; elems++) {
       if (elems < 100 || (elems % 1000 == 0)) {
         Tensor a(dt, TensorShape({1, static_cast<int64>(v.size())}));
-        test::FillValues<string>(&a, v);
+        test::FillValues<tstring>(&a, v);
         Validate(a, (elems == 0), true);
       }
       v.push_back(strings::StrCat("This is string ", elems));

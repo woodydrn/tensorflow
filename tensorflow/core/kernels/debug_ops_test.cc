@@ -13,12 +13,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <dirent.h>
 #include <string.h>
+
 #include <fstream>
 #include <vector>
 
 #include "tensorflow/core/debug/debug_io_utils.h"
+#include "tensorflow/core/debug/debug_node_key.h"
 #include "tensorflow/core/framework/fake_input.h"
 #include "tensorflow/core/framework/node_def_builder.h"
 #include "tensorflow/core/framework/summary.pb.h"
@@ -28,6 +29,7 @@ limitations under the License.
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/kernels/ops_testutil.h"
 #include "tensorflow/core/kernels/ops_util.h"
+#include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/io/path.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/platform/env.h"
@@ -96,51 +98,51 @@ TEST_F(DebugIdentityOpTest, Int32Success_6_FileURLs) {
     ASSERT_TRUE(env_->IsDirectory(dump_roots[i]).ok());
 
     std::vector<string> device_roots;
-    DIR* dir0 = opendir(dump_roots[i].c_str());
-    struct dirent* ent0;
-    const string kDeviceDirPrefix =
-        strings::StrCat(DebugIO::kMetadataFilePrefix, DebugIO::kDeviceTag);
-    while ((ent0 = readdir(dir0)) != nullptr) {
-      if (!strncmp(ent0->d_name, kDeviceDirPrefix.c_str(),
+    FileSystem* fs = nullptr;
+    TF_ASSERT_OK(Env::Default()->GetFileSystemForFile(dump_roots[i], &fs));
+    std::vector<string> children;
+    TF_ASSERT_OK(fs->GetChildren(dump_roots[i], &children));
+
+    const string kDeviceDirPrefix = strings::StrCat(
+        DebugNodeKey::kMetadataFilePrefix, DebugNodeKey::kDeviceTag);
+    for (const string child : children) {
+      if (!strncmp(child.c_str(), kDeviceDirPrefix.c_str(),
                    kDeviceDirPrefix.size())) {
-        device_roots.push_back(io::JoinPath(dump_roots[i], ent0->d_name));
+        device_roots.push_back(io::JoinPath(dump_roots[i], child));
       }
     }
     ASSERT_EQ(1, device_roots.size());
-    closedir(dir0);
 
     const string& device_root = device_roots[0];
-    DIR* dir = opendir(device_root.c_str());
-    struct dirent* ent;
+    TF_ASSERT_OK(Env::Default()->GetFileSystemForFile(device_root, &fs));
+    TF_ASSERT_OK(fs->GetChildren(device_root, &children));
+
     int dump_files_found = 0;
-    while ((ent = readdir(dir)) != nullptr) {
-      if (strcmp(ent->d_name, ".") && strcmp(ent->d_name, "..")) {
-        dump_files_found++;
+    for (const string child : children) {
+      dump_files_found++;
 
-        // Try reading the file into a Event proto.
-        const string dump_file_path = io::JoinPath(device_root, ent->d_name);
-        std::fstream ifs(dump_file_path, std::ios::in | std::ios::binary);
-        Event event;
-        event.ParseFromIstream(&ifs);
-        ifs.close();
+      // Try reading the file into a Event proto.
+      const string dump_file_path = io::JoinPath(device_root, child);
+      std::fstream ifs(dump_file_path, std::ios::in | std::ios::binary);
+      Event event;
+      event.ParseFromIstream(&ifs);
+      ifs.close();
 
-        ASSERT_GE(event.wall_time(), wall_time);
-        ASSERT_EQ(1, event.summary().value().size());
-        ASSERT_EQ(strings::StrCat("FakeTensor", ":", 0, ":", "DebugIdentity"),
-                  event.summary().value(0).node_name());
+      ASSERT_GE(event.wall_time(), wall_time);
+      ASSERT_EQ(1, event.summary().value().size());
+      ASSERT_EQ(strings::StrCat("FakeTensor", ":", 0, ":", "DebugIdentity"),
+                event.summary().value(0).node_name());
 
-        Tensor tensor_prime(DT_INT32);
-        ASSERT_TRUE(tensor_prime.FromProto(event.summary().value(0).tensor()));
+      Tensor tensor_prime(DT_INT32);
+      ASSERT_TRUE(tensor_prime.FromProto(event.summary().value(0).tensor()));
 
-        // Verify tensor shape and value from the dump file.
-        ASSERT_EQ(TensorShape({6}), tensor_prime.shape());
+      // Verify tensor shape and value from the dump file.
+      ASSERT_EQ(TensorShape({6}), tensor_prime.shape());
 
-        for (int j = 0; j < 6; ++j) {
-          ASSERT_EQ(j + 1, tensor_prime.flat<int32>()(j));
-        }
+      for (int j = 0; j < 6; ++j) {
+        ASSERT_EQ(j + 1, tensor_prime.flat<int32>()(j));
       }
     }
-    closedir(dir);
 
     ASSERT_EQ(1, dump_files_found);
 
@@ -166,11 +168,11 @@ TEST_F(DebugIdentityOpTest, Int32Success_2_3) {
 
 TEST_F(DebugIdentityOpTest, StringSuccess) {
   TF_ASSERT_OK(Init(DT_STRING));
-  AddInputFromArray<string>(TensorShape({6}), {"A", "b", "C", "d", "E", "f"});
+  AddInputFromArray<tstring>(TensorShape({6}), {"A", "b", "C", "d", "E", "f"});
   TF_ASSERT_OK(RunOpKernel());
   Tensor expected(allocator(), DT_STRING, TensorShape({6}));
-  test::FillValues<string>(&expected, {"A", "b", "C", "d", "E", "f"});
-  test::ExpectTensorEqual<string>(expected, *GetOutput(0));
+  test::FillValues<tstring>(&expected, {"A", "b", "C", "d", "E", "f"});
+  test::ExpectTensorEqual<tstring>(expected, *GetOutput(0));
 }
 
 // Tests for DebugNanCountOp
@@ -259,10 +261,6 @@ class DebugNumericSummaryOpTest : public OpsTestBase {
 
 #if defined(PLATFORM_GOOGLE)
   void ClearEnabledWatchKeys() { DebugGrpcIO::ClearEnabledWatchKeys(); }
-
-  void CreateEmptyEnabledSet(const string& grpc_debug_url) {
-    DebugGrpcIO::CreateEmptyEnabledSet(grpc_debug_url);
-  }
 #endif
 };
 
@@ -367,7 +365,7 @@ TEST_F(DebugNumericSummaryOpTest, Float_only_valid_values) {
        7.33333333333,  // variance of non-inf and non-nan elements.
        static_cast<double>(DT_FLOAT),  // dtype
        2.0,                            // Number of dimensions.
-       2.0, 3.0});                     // Dimensoin sizes.
+       2.0, 3.0});                     // Dimension sizes.
 
   test::ExpectTensorNear<double>(expected, *GetOutput(0), 1e-8);
 }
@@ -577,7 +575,8 @@ TEST_F(DebugNumericSummaryOpTest, UInt8Success) {
 
 TEST_F(DebugNumericSummaryOpTest, BoolSuccess) {
   TF_ASSERT_OK(Init(DT_BOOL));
-  AddInputFromArray<bool>(TensorShape({2, 3}), {0, 0, 1, 1, 1, 0});
+  AddInputFromArray<bool>(TensorShape({2, 3}),
+                          {false, false, true, true, true, false});
   TF_ASSERT_OK(RunOpKernel());
 
   Tensor expected(allocator(), DT_DOUBLE, TensorShape({16}));
@@ -604,7 +603,6 @@ TEST_F(DebugNumericSummaryOpTest, BoolSuccess) {
 #if defined(PLATFORM_GOOGLE)
 TEST_F(DebugNumericSummaryOpTest, DisabledDueToEmptyEnabledSet) {
   ClearEnabledWatchKeys();
-  CreateEmptyEnabledSet("grpc://server:3333");
 
   std::vector<string> debug_urls({"grpc://server:3333"});
   TF_ASSERT_OK(InitGated(DT_FLOAT, debug_urls));
@@ -617,8 +615,9 @@ TEST_F(DebugNumericSummaryOpTest, DisabledDueToEmptyEnabledSet) {
 
 TEST_F(DebugNumericSummaryOpTest, DisabledDueToNonMatchingWatchKey) {
   ClearEnabledWatchKeys();
-  DebugGrpcIO::EnableWatchKey("grpc://server:3333",
-                              "FakeTensor:1:DebugNumeriSummary");
+  DebugGrpcIO::SetDebugNodeKeyGrpcState(
+      "grpc://server:3333", "FakeTensor:1:DebugNumeriSummary",
+      EventReply::DebugOpStateChange::READ_ONLY);
 
   std::vector<string> debug_urls({"grpc://server:3333"});
   TF_ASSERT_OK(InitGated(DT_FLOAT, debug_urls));

@@ -16,22 +16,10 @@ limitations under the License.
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 
 namespace tensorflow {
-REGISTER7(UnaryOp, CPU, "Square", functor::square, float, Eigen::half, double,
-          int32, int64, complex64, complex128);
+REGISTER8(UnaryOp, CPU, "Square", functor::square, float, Eigen::half, double,
+          int32, int64, complex64, complex128, bfloat16);
 
-#if TENSORFLOW_USE_SYCL
-#define REGISTER_SYCL_KERNEL(TYPE)                                    \
-  REGISTER_KERNEL_BUILDER(                                            \
-                          Name("Square")                              \
-                          .Device(DEVICE_SYCL)                        \
-                          .TypeConstraint<TYPE>("T"),                 \
-                          UnaryOp<SYCLDevice, functor::square<TYPE>>);
-REGISTER_SYCL_KERNEL(float);
-REGISTER_SYCL_KERNEL(double);
-#undef REGISTER_SYCL_KERNEL
-#endif // TENSORFLOW_USE_SYC
-
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 REGISTER4(UnaryOp, GPU, "Square", functor::square, float, Eigen::half, double,
           int64);
 
@@ -45,4 +33,14 @@ REGISTER_KERNEL_BUILDER(Name("Square")
                             .TypeConstraint<int32>("T"),
                         UnaryOp<CPUDevice, functor::square<int32>>);
 #endif
+
+#ifdef TENSORFLOW_USE_SYCL
+REGISTER3(UnaryOp, SYCL, "Square", functor::square, float, double, int64);
+REGISTER_KERNEL_BUILDER(Name("Square")
+                            .Device(DEVICE_SYCL)
+                            .HostMemory("x")
+                            .HostMemory("y")
+                            .TypeConstraint<int32>("T"),
+                        UnaryOp<CPUDevice, functor::square<int32>>);
+#endif  // TENSORFLOW_USE_SYC
 }  // namespace tensorflow

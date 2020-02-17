@@ -8,23 +8,30 @@ exports_files(["COPYING"])
 cc_library(
     name = "gif",
     srcs = [
-        "lib/dgif_lib.c",
-        "lib/egif_lib.c",
-        "lib/gif_err.c",
-        "lib/gif_font.c",
-        "lib/gif_hash.c",
-        "lib/gif_hash.h",
-        "lib/gif_lib_private.h",
-        "lib/gifalloc.c",
-        "lib/openbsd-reallocarray.c",
-        "lib/quantize.c",
+        "dgif_lib.c",
+        "egif_lib.c",
+        "gif_err.c",
+        "gif_font.c",
+        "gif_hash.c",
+        "gif_hash.h",
+        "gif_lib_private.h",
+        "gifalloc.c",
+        "openbsd-reallocarray.c",
+        "quantize.c",
     ],
-    hdrs = ["lib/gif_lib.h"],
-    includes = ["lib/."],
+    hdrs = ["gif_lib.h"],
+    defines = select({
+        ":android": [
+            "S_IREAD=S_IRUSR",
+            "S_IWRITE=S_IWUSR",
+            "S_IEXEC=S_IXUSR",
+        ],
+        "//conditions:default": [],
+    }),
+    includes = ["."],
     visibility = ["//visibility:public"],
     deps = select({
         ":windows": [":windows_polyfill"],
-        ":windows_msvc": [":windows_polyfill"],
         "//conditions:default": [],
     }),
 )
@@ -42,15 +49,13 @@ genrule(
 )
 
 config_setting(
-    name = "windows_msvc",
-    values = {
-        "cpu": "x64_windows_msvc",
-    },
-)
-
-config_setting(
     name = "windows",
     values = {
         "cpu": "x64_windows",
     },
+)
+
+config_setting(
+    name = "android",
+    values = {"crosstool_top": "//external:android/crosstool"},
 )

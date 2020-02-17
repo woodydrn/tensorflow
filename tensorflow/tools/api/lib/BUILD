@@ -1,14 +1,13 @@
 # Helper libraries for TensorFlow API compatibility test.
 
-package(
-    default_visibility = ["//tensorflow/tools/api:__subpackages__"],
+load(
+    "//tensorflow/core/platform:build_config.bzl",
+    "tf_proto_library",
 )
 
-licenses(["notice"])  # Apache 2.0
-
-load(
-    "//tensorflow/core:platform/default/build_config.bzl",
-    "tf_proto_library",
+package(
+    default_visibility = ["//tensorflow/tools/api:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
 )
 
 tf_proto_library(
@@ -22,18 +21,8 @@ py_library(
     srcs_version = "PY2AND3",
     deps = [
         ":api_objects_proto_py",
-        "//tensorflow/tools/common:traverse",
+        "//tensorflow/python:platform",
+        "//tensorflow/python:util",
+        "@six_archive//:six",
     ],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

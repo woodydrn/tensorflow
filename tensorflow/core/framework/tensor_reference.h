@@ -16,7 +16,6 @@ limitations under the License.
 #ifndef TENSORFLOW_FRAMEWORK_TENSOR_REFERENCE_H_
 #define TENSORFLOW_FRAMEWORK_TENSOR_REFERENCE_H_
 
-#include "tensorflow/core/framework/allocation_description.pb.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 
@@ -31,7 +30,10 @@ namespace tensorflow {
 class TensorReference {
  public:
   // Take the reference of the root buffer so the size will be more accurate
-  explicit TensorReference(const Tensor& tensor);
+  explicit TensorReference(const Tensor& tensor)
+      : buf_(tensor.buf_ ? tensor.buf_->root_buffer() : nullptr) {
+    if (buf_) buf_->Ref();
+  }
 
   ~TensorReference() {}
 

@@ -16,15 +16,15 @@ limitations under the License.
 #include "tensorflow/core/kernels/cwise_ops_common.h"
 
 namespace tensorflow {
-REGISTER6(BinaryOp, CPU, "Equal", functor::equal_to, float, Eigen::half, double,
-          uint8, int8, int16);
+REGISTER7(BinaryOp, CPU, "Equal", functor::equal_to, float, Eigen::half, double,
+          uint8, int8, int16, bfloat16);
 REGISTER_KERNEL_BUILDER(
     Name("ApproximateEqual").Device(DEVICE_CPU).TypeConstraint<float>("T"),
     ApproximateEqualOp<CPUDevice, float>);
 REGISTER_KERNEL_BUILDER(
     Name("ApproximateEqual").Device(DEVICE_CPU).TypeConstraint<double>("T"),
     ApproximateEqualOp<CPUDevice, double>);
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 REGISTER4(BinaryOp, GPU, "Equal", functor::equal_to, float, Eigen::half, double,
           uint8);
 REGISTER_KERNEL_BUILDER(
@@ -47,8 +47,8 @@ REGISTER_KERNEL_BUILDER(Name("Equal")
 #endif
 
 #ifdef TENSORFLOW_USE_SYCL
-REGISTER2(BinaryOp, SYCL, "Equal", functor::equal_to, float, double);
-
+REGISTER5(BinaryOp, SYCL, "Equal", functor::equal_to, float, double, uint8,
+          int8, int16);
 REGISTER_KERNEL_BUILDER(Name("Equal")
                             .Device(DEVICE_SYCL)
                             .HostMemory("x")
