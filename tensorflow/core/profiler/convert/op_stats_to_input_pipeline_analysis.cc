@@ -30,6 +30,7 @@ limitations under the License.
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/profiler/convert/op_metrics_to_record.h"
+#include "tensorflow/core/profiler/convert/step_events_to_steps_db.h"
 #include "tensorflow/core/profiler/protobuf/hardware_types.pb.h"
 #include "tensorflow/core/profiler/protobuf/input_pipeline.pb.h"
 #include "tensorflow/core/profiler/protobuf/op_metrics.pb.h"
@@ -55,6 +56,13 @@ const double kNumPsPerMs = 1000000000.0;
 // input-bound; else if it is considered HIGHLY input-bound.
 constexpr double kModeratelyInfeedBoundThresholdInPercent = 5;
 constexpr double kHighlyInfeedBoundThresholdInPercent = 20;
+// If the percentage of step time that is due to outfeed is less than
+// kModeratelyOutfeedBoundThresholdInPercent, it is considered NOT
+// output-bound; else if it is less than
+// kHighlyOutfeedBoundThresholdInPercent, it is considered MODERATELY
+// output-bound; else if it is considered HIGHLY output-bound.
+constexpr double kModeratelyOutfeedBoundThresholdInPercent = 5;
+constexpr double kHighlyOutfeedBoundThresholdInPercent = 20;
 // If the percentage of step time that is due to kernel launch is less than
 // kModeratelyKernelLaunchBoundThresholdInPercent, it is considered NOT
 // kernel-launch bound; else if it is less than
@@ -163,8 +171,8 @@ InputPipelineAnalysisResult ComputeGenericInputPipelineAnalysisResult(
   Stat<double> input_summary_stats_in_percent;
   for (const auto& coreid_stepinfo_map : grouped_by_step) {
     // Iterates over each step.
-    const auto* ptr =
-        gtl::FindOrNull(coreid_stepinfo_map.step_info_per_core(), 0);
+    const auto* ptr = gtl::FindOrNull(coreid_stepinfo_map.step_info_per_core(),
+                                      kDefaultGpuLocalCoreId);
     if (ptr == nullptr) {
       // For generic hardware, all step-info is put under core-0. If ptr
       // is nullptr, it means there is no step at all.
@@ -400,9 +408,9 @@ std::string MakeDocLink(absl::string_view doc_link, absl::string_view text) {
                       "</a>");
 }
 
-// Returns the HTML link to the introduction to the Dataset API.
+// Returns the HTML link to the introduction to the tf.data API.
 std::string DatasetIntroDoc() {
-  return "https://www.tensorflow.org/programmers_guide/datasets";
+  return "https://www.tensorflow.org/guide/data";
 }
 
 }  // namespace
@@ -489,7 +497,7 @@ InputPipelineAnalysisRecommendation GenerateRecommendation() {
       " or preprocess the data OFFLINE.");
   *recommendation.add_details() = absl::StrCat(
       "Reading data from files in advance: you may tune parameters in the "
-      "following Dataset API (",
+      "following tf.data API (",
       AnchorElement(absl::StrCat(kDatasetTopic, "prefetch"), "prefetch size"),
       ", ",
       AnchorElement(absl::StrCat(kDatasetTopic, "interleave"),
@@ -497,13 +505,13 @@ InputPipelineAnalysisRecommendation GenerateRecommendation() {
       ", ", AnchorElement(kTfRecordDataset, "reader buffer_size"), ")");
   *recommendation.add_details() = absl::StrCat(
       "Reading data from files on demand: you should read data IN ADVANCE "
-      "using the following Dataset API (",
+      "using the following tf.data API (",
       AnchorElement(absl::StrCat(kDatasetTopic, "prefetch"), "prefetch"), ", ",
       AnchorElement(absl::StrCat(kDatasetTopic, "interleave"), "interleave"),
       ", ", AnchorElement(kTfRecordDataset, "reader buffer"), ")");
   *recommendation.add_details() = absl::StrCat(
       "Other data reading or processing: you may consider using the ",
-      AnchorElement(kDatasetIntro, "Dataset API"),
+      AnchorElement(kDatasetIntro, "tf.data API"),
       " (if you are not using it now)");
 
   return recommendation;
@@ -549,17 +557,17 @@ InputPipelineAnalysisResult ConvertOpStatsToInputPipelineAnalysis(
   return result;
 }
 
-void InfeedAnalysis(double infeed_percent, string* input_classification,
-                    string* input_statement) {
+void InputAnalysis(double input_percent, string* input_classification,
+                   string* input_statement) {
   absl::string_view non_input_time = "other time";
-  string infeed_percent_str = absl::StrFormat("%.1lf", infeed_percent);
-  if (infeed_percent >= kHighlyInfeedBoundThresholdInPercent) {
+  string infeed_percent_str = absl::StrFormat("%.1lf", input_percent);
+  if (input_percent >= kHighlyInfeedBoundThresholdInPercent) {
     *input_classification = "host";
     *input_statement = absl::StrCat(
         "Your program is HIGHLY input-bound because ", infeed_percent_str,
         "% of the total step time sampled is waiting for input. Therefore, you "
         "should first focus on reducing the input time.");
-  } else if (infeed_percent >= kModeratelyInfeedBoundThresholdInPercent) {
+  } else if (input_percent >= kModeratelyInfeedBoundThresholdInPercent) {
     *input_classification = "both";
     *input_statement = absl::StrCat(
         "Your program is MODERATELY input-bound because ", infeed_percent_str,
@@ -574,6 +582,31 @@ void InfeedAnalysis(double infeed_percent, string* input_classification,
         "input. Therefore, you should focus on "
         "reducing ",
         non_input_time, ".");
+  }
+}
+
+void OutputAnalysis(double output_percent, string* output_classification,
+                    string* output_statement) {
+  string tc_outfeed_percent_str = absl::StrFormat("%.1lf", output_percent);
+  if (output_percent >= kHighlyOutfeedBoundThresholdInPercent) {
+    *output_classification = "host";
+    *output_statement = absl::StrCat(
+        "Your program is HIGHLY output-bound because ", tc_outfeed_percent_str,
+        "% of the total step time sampled is spent on output. Therefore, you "
+        "should first focus on reducing the output time.");
+  } else if (output_percent >= kModeratelyOutfeedBoundThresholdInPercent) {
+    *output_classification = "both";
+    *output_statement = absl::StrCat(
+        "Your program is MODERATELY output-bound because ",
+        tc_outfeed_percent_str,
+        "% of the total step time sampled is spent on output. Therefore, "
+        "you would need to reduce both the output time and other time.");
+  } else {
+    *output_classification = "device";
+    *output_statement =
+        absl::StrCat("Your program is NOT output-bound because only ",
+                     tc_outfeed_percent_str,
+                     "% of the total step time sampled is spent on output.");
   }
 }
 
@@ -626,7 +659,7 @@ BottleneckAnalysis ComputeBottleneckAnalysis(
   double all_other_percent = 100.0 * total_unknown_ms / total_step_time_ms;
   string input_classification;
   string input_statement;
-  InfeedAnalysis(input_percent, &input_classification, &input_statement);
+  InputAnalysis(input_percent, &input_classification, &input_statement);
 
   string kernel_launch_classification;
   string kernel_launch_statement;

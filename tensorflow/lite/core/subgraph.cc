@@ -29,6 +29,8 @@ limitations under the License.
 
 namespace tflite {
 
+namespace impl {
+
 namespace {
 
 struct TfLiteQuantizationDeleter {
@@ -127,14 +129,15 @@ TfLiteQuantizationParams GetLegacyQuantization(
 
 static constexpr const char kUnknownCustomOpName[] = "UnknownCustomOp";
 const char* GetTFLiteOpName(const TfLiteRegistration& op_reg) {
-  const char* op_name = nullptr;
   if (op_reg.builtin_code == tflite::BuiltinOperator_CUSTOM) {
     const char* const custom_name = op_reg.custom_name;
-    op_name = custom_name ? custom_name : kUnknownCustomOpName;
-  } else {
-    op_name = tflite::EnumNamesBuiltinOperator()[op_reg.builtin_code];
+    return custom_name ? custom_name : kUnknownCustomOpName;
   }
-  return op_name;
+  if (op_reg.builtin_code == tflite::BuiltinOperator_DELEGATE &&
+      op_reg.custom_name) {
+    return op_reg.custom_name;
+  }
+  return tflite::EnumNamesBuiltinOperator()[op_reg.builtin_code];
 }
 
 }  // namespace
@@ -938,6 +941,22 @@ TfLiteStatus Subgraph::Invoke() {
 TfLiteStatus Subgraph::ResizeTensor(TfLiteContext* context,
                                     TfLiteTensor* tensor,
                                     TfLiteIntArray* new_size) {
+  // If the dimensions don't change, avoiding
+  // unnecessary (re)allocations.
+  //
+  // Note that it's required to check `tensor->data.raw != nullptr`. Otherwise
+  // the subgraph won't allocate memory for a dynamic tensor when its size
+  // is equal to the original tensor size.
+  if (tensor->data.raw != nullptr &&
+      EqualArrayAndTfLiteIntArray(tensor->dims, new_size->size,
+                                  new_size->data)) {
+    // A number of clients assume |new_size| remains valid upon success, so
+    // swap it in as the new (but logically identical) tensor dims.
+    TfLiteIntArrayFree(tensor->dims);
+    tensor->dims = new_size;
+    return kTfLiteOk;
+  }
+
   // Note here that context->impl_ is recovering the this pointer for an
   // instance of Interpreter to call into the member function ResizeTensorImpl
   // (this function is static).
@@ -1347,5 +1366,7 @@ TfLiteStatus Subgraph::ModifyGraphWithDelegate(TfLiteDelegate* delegate) {
 
   return status;
 }
+
+}  // namespace impl
 
 }  // namespace tflite

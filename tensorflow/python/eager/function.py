@@ -981,7 +981,7 @@ class _TapeGradientFunctions(object):
         self._func_graph.outputs,
         forward_function_attr)
 
-    if not self._func_graph.outputs or not input_tangents:
+    if not input_tangents:
       # There is no need to special-case forwardprop, so we can return the
       # forward+backward pair we've created without further wrapping.
       return (forward_function, self._func_graph, backward_function,
@@ -1085,6 +1085,11 @@ class _TapeGradientFunctions(object):
              "StatefulPartitionedCall": gradient_function}):
           forward_outputs = forward_function.call(context.context(),
                                                   forward_inputs)
+          if isinstance(forward_outputs, ops.Operation):
+            # _wrapped_backward_function expects a list, but if the function has
+            # no outputs its call() returns an Operation. We need to undo that
+            # so we don't cause problems later.
+            forward_outputs = []
         py_backward, _ = self._wrap_backward_function(
             self._func_graph, backward_function, forward_outputs)
       # We will never request backward tape gradients for this operation
@@ -1686,7 +1691,7 @@ class ConcreteFunction(object):
       default_graph.mark_as_unsaveable(self._func_graph.saving_errors)
 
     if (tape.could_possibly_record() or
-        hasattr(ops.get_default_graph(), "watch_variable")):
+        hasattr(default_graph, "watch_variable")):
       for v in self._func_graph.variables:
         resource_variable_ops.variable_accessed(v)
 
@@ -1749,7 +1754,7 @@ class ConcreteFunction(object):
           ctx, args_with_tangents,
           cancellation_manager=cancellation_manager)
     else:
-      with ops.get_default_graph()._override_gradient_function(  # pylint: disable=protected-access
+      with default_graph._override_gradient_function(  # pylint: disable=protected-access
           {"PartitionedCall": self._get_gradient_function(),
            "StatefulPartitionedCall": self._get_gradient_function()}):
         flat_outputs = forward_function.call(ctx, args_with_tangents)
@@ -2224,6 +2229,7 @@ class FunctionSpec(object):
 
     if self._input_signature is None:
       inputs = _convert_numpy_inputs(inputs)
+      kwargs = _convert_numpy_inputs(kwargs)
       return inputs, kwargs
     else:
       assert not kwargs
@@ -2271,7 +2277,8 @@ def _convert_inputs_to_signature(inputs, input_signature, flat_input_signature):
     flatten_inputs = nest.flatten_up_to(
         input_signature,
         inputs[:len(input_signature)],
-        expand_composites=True)
+        expand_composites=True,
+        check_types=False)  # lists are convert to tuples for `tf.data`.
   except ValueError:
     raise ValueError("Structure of Python function inputs does not match "
                      "input_signature:\n%s" %
@@ -2488,9 +2495,6 @@ class Function(object):
       args, kwargs = None, None
     with self._lock:
       graph_function, args, kwargs = self._maybe_define_function(args, kwargs)
-      if self.input_signature:
-        args = self.input_signature
-        kwargs = {}
       seen_names = set()
       captured = object_identity.ObjectIdentitySet(
           graph_function.graph.internal_captures)
