@@ -40,16 +40,19 @@ def if_cuda_clang_opt(if_true, if_false = []):
 
 def cuda_default_copts():
     """Default options for all CUDA compilations."""
-    return if_cuda(
-        ["-x", "cuda", "-DGOOGLE_CUDA=1"]
-    ) + if_cuda_clang_opt(
+    return if_cuda([
+        "-x", "cuda",
+        "-DGOOGLE_CUDA=1",
+        "-Xcuda-fatbinary=--compress-all",
+        "--no-cuda-include-ptx=all"
+    ] + %{cuda_extra_copts}) + if_cuda_clang_opt(
         # Some important CUDA optimizations are only enabled at O3.
         ["-O3"]
-    ) + %{cuda_extra_copts}
+    )
 
-def cuda_is_configured():
-    """Returns true if CUDA was enabled during the configure process."""
-    return %{cuda_is_configured}
+def cuda_gpu_architectures():
+    """Returns a list of supported GPU architectures."""
+    return %{cuda_gpu_architectures}
 
 def if_cuda_is_configured(x):
     """Tests if the CUDA was enabled during the configure process.
@@ -57,7 +60,7 @@ def if_cuda_is_configured(x):
     Unlike if_cuda(), this does not require that we are building with
     --config=cuda. Used to allow non-CUDA code to depend on CUDA libraries.
     """
-    if cuda_is_configured():
+    if %{cuda_is_configured}:
       return select({"//conditions:default": x})
     return select({"//conditions:default": []})
 

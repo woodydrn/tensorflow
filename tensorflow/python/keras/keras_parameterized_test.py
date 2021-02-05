@@ -27,7 +27,7 @@ from tensorflow.python import tf2
 from tensorflow.python.eager import context
 from tensorflow.python.keras import keras_parameterized
 from tensorflow.python.keras import testing_utils
-from tensorflow.python.platform import googletest
+from tensorflow.python.platform import test
 
 
 class KerasParameterizedTest(keras_parameterized.TestCase):
@@ -206,7 +206,7 @@ class KerasParameterizedTest(keras_parameterized.TestCase):
       def runTest(self):
         pass
 
-      @keras_parameterized.run_all_keras_modes
+      @keras_parameterized.run_all_keras_modes()
       def testBody(self):
         mode = "eager" if context.executing_eagerly() else "graph"
         should_run_eagerly = testing_utils.should_run_eagerly()
@@ -250,7 +250,7 @@ class KerasParameterizedTest(keras_parameterized.TestCase):
       def runTest(self):
         pass
 
-      @keras_parameterized.run_all_keras_modes
+      @keras_parameterized.run_all_keras_modes()
       @parameterized.named_parameters(
           [dict(testcase_name="_0", with_brackets=True),
            dict(testcase_name="_1", with_brackets=False)])
@@ -550,4 +550,4 @@ class KerasParameterizedTest(keras_parameterized.TestCase):
     self.assertEqual(arg, True)
 
 if __name__ == "__main__":
-  googletest.main()
+  test.main()

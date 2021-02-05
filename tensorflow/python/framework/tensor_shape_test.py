@@ -195,6 +195,14 @@ class DimensionTest(test_util.TensorFlowTestCase):
     with self.assertRaises(TypeError):
       tensor_shape.Dimension(dtypes.string)
 
+  def testBool(self):
+    one = tensor_shape.Dimension(1)
+    zero = tensor_shape.Dimension(0)
+    has_none = tensor_shape.Dimension(None)
+    self.assertTrue(one)
+    self.assertFalse(zero)
+    self.assertFalse(has_none)
+
   def testMod(self):
     four = tensor_shape.Dimension(4)
     nine = tensor_shape.Dimension(9)
@@ -217,15 +225,15 @@ class DimensionTest(test_util.TensorFlowTestCase):
     two = tensor_shape.Dimension(2)
     message = (r"unsupported operand type\(s\) for /: "
                r"'Dimension' and 'Dimension', please use // instead")
-    with self.assertRaisesRegexp(TypeError, message):
+    with self.assertRaisesRegex(TypeError, message):
       _ = six / two
     message = (r"unsupported operand type\(s\) for /: "
                r"'Dimension' and 'int', please use // instead")
-    with self.assertRaisesRegexp(TypeError, message):
+    with self.assertRaisesRegex(TypeError, message):
       _ = six / 2
     message = (r"unsupported operand type\(s\) for /: "
                r"'int' and 'Dimension', please use // instead")
-    with self.assertRaisesRegexp(TypeError, message):
+    with self.assertRaisesRegex(TypeError, message):
       _ = 6 / two
 
 
@@ -376,6 +384,20 @@ class ShapeTest(test_util.TensorFlowTestCase, parameterized.TestCase):
     else:
       self.assertEqual(expected, mcs.as_list())
 
+  def testHash(self):
+    base = tensor_shape.TensorShape([1, 2, 3, 4])
+    base_copy = tensor_shape.TensorShape([1, 2, 3, 4])
+    self.assertEqual(hash(base), hash(base_copy))
+
+    with self.assertRaisesRegex(ValueError, r"Unable to hash partially"):
+      hash(tensor_shape.TensorShape([1, 2, 3, 4, None]))
+
+    with self.assertRaisesRegex(ValueError, r"Unable to hash partially"):
+      hash(tensor_shape.TensorShape(None))
+
+    with self.assertRaisesRegex(ValueError, r"Unable to hash Dimension"):
+      hash(tensor_shape.Dimension(None))
+
   def testMostSpecificCompatibleShape(self):
     self._testMostSpecificCompatibleShapeHelper([1, 2], None, None)
     self._testMostSpecificCompatibleShapeHelper(None, [1, 2], None)
@@ -390,7 +412,7 @@ class ShapeTest(test_util.TensorFlowTestCase, parameterized.TestCase):
   def testTruedivFails(self):
     unknown = tensor_shape.Dimension(None)
     self.assertEqual((unknown // unknown).value, None)
-    with self.assertRaisesRegexp(TypeError, r"unsupported operand type"):
+    with self.assertRaisesRegex(TypeError, r"unsupported operand type"):
       unknown / unknown  # pylint: disable=pointless-statement
 
   def testConvertFromProto(self):
@@ -481,8 +503,8 @@ class ShapeTest(test_util.TensorFlowTestCase, parameterized.TestCase):
       _ = unk1 != unk0
 
   def testAsList(self):
-    with self.assertRaisesRegexp(ValueError,
-                                 "not defined on an unknown TensorShape"):
+    with self.assertRaisesRegex(ValueError,
+                                "not defined on an unknown TensorShape"):
       tensor_shape.unknown_shape().as_list()
     self.assertAllEqual([None, None], tensor_shape.unknown_shape(2).as_list())
     self.assertAllEqual([2, None, 4], tensor_shape.TensorShape(

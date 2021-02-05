@@ -136,10 +136,11 @@ void ReadVariableOp::Compute(OpKernelContext* ctx) {
   const auto status = LookupResource(ctx, handle, &variable);
   OP_REQUIRES(ctx, status.ok(),
               errors::FailedPrecondition(
-                  "Error while reading resource variable ", handle.name(),
-                  " from Container: ", handle.container(),
-                  ". This could mean that the variable was uninitialized. ",
-                  status.ToString()));
+                  "Could not find variable ", handle.name(), ". ",
+                  "This could mean that the variable has been deleted. ",
+                  "In TF1, it can also mean the variable is uninitialized. ",
+                  "Debug info: container=", handle.container(),
+                  ", status=", status.ToString()));
 
   tf_shared_lock ml(*variable->mu());
   // We're acquiring a reference to the underlying buffer while
@@ -222,8 +223,6 @@ VarHandleOp::VarHandleOp(OpKernelConstruction* context) : OpKernel(context) {
   OP_REQUIRES_OK(context, context->GetAttr("dtype", &dtype_and_shape_.dtype));
   PartialTensorShape shape;
   OP_REQUIRES_OK(context, context->GetAttr("shape", &dtype_and_shape_.shape));
-  OP_REQUIRES_OK(context,
-                 context->GetAttr("allowed_devices", &allowed_devices_));
 
   is_anonymous_ = name_ == ResourceHandle::ANONYMOUS_NAME;
 
@@ -234,8 +233,7 @@ VarHandleOp::VarHandleOp(OpKernelConstruction* context) : OpKernel(context) {
                                                    &resource_, attr));
     resource_.scalar<ResourceHandle>()() = MakeResourceHandle<Var>(
         context, container_, name_,
-        std::vector<DtypeAndPartialTensorShape>{dtype_and_shape_},
-        allowed_devices_);
+        std::vector<DtypeAndPartialTensorShape>{dtype_and_shape_});
   }
 }
 
@@ -249,7 +247,7 @@ void VarHandleOp::Compute(OpKernelContext* ctx) {
     handle.scalar<ResourceHandle>()() = MakeResourceHandle<Var>(
         ctx, container_, name_,
         std::vector<DtypeAndPartialTensorShape>{dtype_and_shape_},
-        allowed_devices_);
+        ctx->stack_trace());
     ctx->set_output(0, handle);
   } else {
     ctx->set_output(0, resource_);
@@ -282,6 +280,7 @@ REGISTER_KERNEL_BUILDER(
 TF_CALL_GPU_ALL_TYPES(REGISTER_GPU_KERNELS);
 TF_CALL_int64(REGISTER_GPU_KERNELS);
 TF_CALL_variant(REGISTER_GPU_KERNELS);
+TF_CALL_uint32(REGISTER_GPU_KERNELS);
 #undef REGISTER_GPU_KERNELS
 
 REGISTER_KERNEL_BUILDER(Name("_VarHandlesOp")
@@ -397,7 +396,17 @@ class AssignVariableOp : public OpKernel {
                                   return Status::OK();
                                 }));
     mutex_lock ml(*variable->mu());
-    OP_REQUIRES(context, variable->tensor()->dtype() == dtype_,
+    // (variable->tensor()->dtype() == DT_INVALID && !variable->is_initialized)
+    // check below is to allow an XLA specific situation wherein update can
+    // happen first by the AssignVariableOp,
+    // in which case the variable is still uninitialized.
+    // When using TF-XLA, this scenario is possible when the execution uses the
+    // 'fallback' path (which essentially invokes Tensorflow ops via
+    // partitioned_call).
+    OP_REQUIRES(context,
+                (variable->tensor()->dtype() == DT_INVALID &&
+                 !variable->is_initialized) ||
+                    variable->tensor()->dtype() == dtype_,
                 errors::InvalidArgument(
                     "Trying to assign variable with wrong dtype. Expected ",
                     DataTypeString(variable->tensor()->dtype()), " got ",
@@ -524,6 +533,7 @@ TF_CALL_QUANTIZED_TYPES(REGISTER_KERNELS);
 TF_CALL_GPU_ALL_TYPES(REGISTER_GPU_KERNELS);
 TF_CALL_int64(REGISTER_GPU_KERNELS);
 TF_CALL_variant(REGISTER_GPU_KERNELS);
+TF_CALL_uint32(REGISTER_GPU_KERNELS);
 #undef REGISTER_GPU_KERNELS
 #endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
@@ -884,6 +894,17 @@ class ResourceScatterUpdateOp : public OpKernel {
     const Tensor& indices = c->input(1);
     const Tensor& updates = c->input(2);
 
+    // Check that rank(updates.shape) = rank(indices.shape + params.shape[1:])
+    OP_REQUIRES(c,
+                updates.dims() == 0 ||
+                    updates.dims() == indices.dims() + params->dims() - 1,
+                errors::InvalidArgument(
+                    "Must have updates.shape = indices.shape + "
+                    "params.shape[1:] or updates.shape = [], got ",
+                    "updates.shape ", updates.shape().DebugString(),
+                    ", indices.shape ", indices.shape().DebugString(),
+                    ", params.shape ", params->shape().DebugString()));
+
     // Check that we have enough index space
     const int64 N_big = indices.NumElements();
     OP_REQUIRES(
@@ -989,8 +1010,8 @@ REGISTER_SCATTER_KERNEL(Variant, CPU, "ResourceScatterUpdate",
 
 #define REGISTER_SCATTER_UPDATE_GPU(type) REGISTER_SCATTER_UPDATE(type, GPU);
 
-TF_CALL_GPU_NUMBER_TYPES_NO_HALF(REGISTER_SCATTER_ARITHMETIC_GPU);
-TF_CALL_GPU_NUMBER_TYPES_NO_HALF(REGISTER_SCATTER_MINMAX_GPU);
+TF_CALL_GPU_NUMBER_TYPES(REGISTER_SCATTER_ARITHMETIC_GPU);
+TF_CALL_GPU_NUMBER_TYPES(REGISTER_SCATTER_MINMAX_GPU);
 
 REGISTER_KERNEL_BUILDER(Name("ResourceScatterUpdate")
                             .Device(DEVICE_GPU)

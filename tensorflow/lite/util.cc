@@ -14,8 +14,16 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/lite/util.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <algorithm>
 #include <complex>
 #include <cstring>
+#include <initializer_list>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/common.h"
@@ -36,6 +44,14 @@ TfLiteStatus UnresolvedOpInvoke(TfLiteContext* context, TfLiteNode* node) {
 bool IsFlexOp(const char* custom_name) {
   return custom_name && strncmp(custom_name, kFlexCustomCodePrefix,
                                 strlen(kFlexCustomCodePrefix)) == 0;
+}
+
+std::unique_ptr<TfLiteIntArray, TfLiteIntArrayDeleter> BuildTfLiteIntArray(
+    const std::vector<int>& data) {
+  std::unique_ptr<TfLiteIntArray, TfLiteIntArrayDeleter> result(
+      TfLiteIntArrayCreate(data.size()));
+  std::copy(data.begin(), data.end(), result->data);
+  return result;
 }
 
 TfLiteIntArray* ConvertVectorToTfLiteIntArray(const std::vector<int>& input) {
@@ -88,11 +104,17 @@ TfLiteStatus GetSizeOfType(TfLiteContext* context, const TfLiteType type,
     case kTfLiteInt64:
       *bytes = sizeof(int64_t);
       break;
+    case kTfLiteUInt64:
+      *bytes = sizeof(uint64_t);
+      break;
     case kTfLiteBool:
       *bytes = sizeof(bool);
       break;
     case kTfLiteComplex64:
       *bytes = sizeof(std::complex<float>);
+      break;
+    case kTfLiteComplex128:
+      *bytes = sizeof(std::complex<double>);
       break;
     case kTfLiteInt16:
       *bytes = sizeof(int16_t);
@@ -110,8 +132,9 @@ TfLiteStatus GetSizeOfType(TfLiteContext* context, const TfLiteType type,
       if (context) {
         context->ReportError(
             context,
-            "Type %d is unsupported. Only float32, int8, int16, int32, int64, "
-            "uint8, bool, complex64 supported currently.",
+            "Type %d is unsupported. Only float16, float32, float64, int8, "
+            "int16, int32, int64, uint8, uint64, bool, complex64 and "
+            "complex128 supported currently.",
             type);
       }
       return kTfLiteError;

@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <string.h>
 
+#include "tensorflow/lite/c/common.h"
+
 namespace tflite {
 
 TfLiteStatus ResetVariableTensor(TfLiteTensor* tensor) {
@@ -43,6 +45,17 @@ TfLiteStatus ResetVariableTensor(TfLiteTensor* tensor) {
   }
 #endif
   return kTfLiteOk;
+}
+
+bool HasUnspecifiedDimension(const TfLiteTensor* tensor) {
+#ifndef TF_LITE_STATIC_MEMORY
+  if (tensor->dims_signature) {
+    for (int i = 0; i < tensor->dims_signature->size; ++i) {
+      if (tensor->dims_signature->data[i] == -1) return true;
+    }
+  }
+#endif
+  return false;
 }
 
 }  // namespace tflite

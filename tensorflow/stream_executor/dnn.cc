@@ -94,6 +94,8 @@ std::string QuantizedActivationModeString(QuantizedActivationMode mode) {
 
 std::string ActivationModeString(ActivationMode mode) {
   switch (mode) {
+    case ActivationMode::kNone:
+      return "none";
     case ActivationMode::kSigmoid:
       return "sigmoid";
     case ActivationMode::kRelu:
@@ -618,16 +620,14 @@ bool DnnSupport::IsStatusOk(const port::Status& status, bool report_error) {
   return false;
 }
 
-port::Status DnnSupport::DoCtcLoss(Stream* stream, dnn::DataType element_type,
-                                   const RnnStateTensorDescriptor& probs_desc,
-                                   const DeviceMemoryBase probs_data,
-                                   absl::Span<const int> labels_data,
-                                   absl::Span<const int> labels_lengths_data,
-                                   absl::Span<const int> input_lengths_data,
-                                   DeviceMemoryBase costs_data,
-                                   const RnnStateTensorDescriptor& grads_desc,
-                                   DeviceMemoryBase grads_data,
-                                   DeviceMemory<uint8> scratch_memory) {
+port::Status DnnSupport::DoCtcLoss(
+    Stream* stream, dnn::DataType element_type,
+    const RnnStateTensorDescriptor& probs_desc,
+    const DeviceMemoryBase probs_data, absl::Span<const int> labels_data,
+    absl::Span<const int> labels_lengths_data,
+    absl::Span<const int> input_lengths_data, DeviceMemoryBase costs_data,
+    const RnnStateTensorDescriptor& grads_desc, DeviceMemoryBase grads_data,
+    DeviceMemory<uint8> scratch_memory, int ctc_loss_algo_id) {
   return port::UnimplementedError("CtcLoss not implemented");
 }
 

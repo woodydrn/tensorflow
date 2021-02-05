@@ -111,7 +111,7 @@ class ThreadPoolHandleOp : public OpKernel {
     }
     OP_REQUIRES_OK(ctx, MakeResourceHandleToOutput(
                             ctx, 0, cinfo_.container(), cinfo_.name(),
-                            MakeTypeIndex<ThreadPoolResource>()));
+                            TypeIndex::Make<ThreadPoolResource>()));
   }
 
  private:
@@ -173,6 +173,12 @@ class ThreadPoolDatasetOp : public UnaryDatasetOpKernel {
 
     int64 Cardinality() const override { return input_->Cardinality(); }
 
+    Status InputDatasets(
+        std::vector<const DatasetBase*>* inputs) const override {
+      inputs->push_back(input_);
+      return Status::OK();
+    }
+
     Status CheckExternalState() const override {
       return input_->CheckExternalState();
     }
@@ -204,7 +210,6 @@ class ThreadPoolDatasetOp : public UnaryDatasetOpKernel {
       Status GetNextInternal(IteratorContext* ctx,
                              std::vector<Tensor>* out_tensors,
                              bool* end_of_sequence) override {
-        mutex_lock l(mu_);
         return input_impl_->GetNext(IteratorContext(CreateParams(ctx)),
                                     out_tensors, end_of_sequence);
       }
@@ -218,7 +223,6 @@ class ThreadPoolDatasetOp : public UnaryDatasetOpKernel {
 
       Status SaveInternal(SerializationContext* ctx,
                           IteratorStateWriter* writer) override {
-        mutex_lock l(mu_);
         DCHECK(input_impl_ != nullptr);
         TF_RETURN_IF_ERROR(SaveInput(ctx, writer, input_impl_));
         return Status::OK();
@@ -226,7 +230,6 @@ class ThreadPoolDatasetOp : public UnaryDatasetOpKernel {
 
       Status RestoreInternal(IteratorContext* ctx,
                              IteratorStateReader* reader) override {
-        mutex_lock l(mu_);
         TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
         return Status::OK();
       }
@@ -242,8 +245,7 @@ class ThreadPoolDatasetOp : public UnaryDatasetOpKernel {
         return params;
       }
 
-      mutex mu_;
-      std::unique_ptr<IteratorBase> input_impl_ TF_GUARDED_BY(mu_);
+      std::unique_ptr<IteratorBase> input_impl_;
     };
 
     const DatasetBase* const input_;
@@ -301,6 +303,13 @@ class MaxIntraOpParallelismDatasetOp : public UnaryDatasetOpKernel {
 
     int64 Cardinality() const override { return input_->Cardinality(); }
 
+    Status InputDatasets(
+        std::vector<const DatasetBase*>* inputs) const override {
+      inputs->clear();
+      inputs->push_back(input_);
+      return Status::OK();
+    }
+
     Status CheckExternalState() const override {
       return input_->CheckExternalState();
     }
@@ -337,7 +346,6 @@ class MaxIntraOpParallelismDatasetOp : public UnaryDatasetOpKernel {
         auto max_parallelism = dataset()->max_intra_op_parallelism_;
         params.runner =
             RunnerWithMaxParallelism(*ctx->runner(), max_parallelism);
-        mutex_lock l(mu_);
         return input_impl_->GetNext(IteratorContext{std::move(params)},
                                     out_tensors, end_of_sequence);
       }
@@ -351,7 +359,6 @@ class MaxIntraOpParallelismDatasetOp : public UnaryDatasetOpKernel {
 
       Status SaveInternal(SerializationContext* ctx,
                           IteratorStateWriter* writer) override {
-        mutex_lock l(mu_);
         DCHECK(input_impl_ != nullptr);
         TF_RETURN_IF_ERROR(SaveInput(ctx, writer, input_impl_));
         return Status::OK();
@@ -359,14 +366,12 @@ class MaxIntraOpParallelismDatasetOp : public UnaryDatasetOpKernel {
 
       Status RestoreInternal(IteratorContext* ctx,
                              IteratorStateReader* reader) override {
-        mutex_lock l(mu_);
         TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
         return Status::OK();
       }
 
      private:
-      mutex mu_;
-      std::unique_ptr<IteratorBase> input_impl_ TF_GUARDED_BY(mu_);
+      std::unique_ptr<IteratorBase> input_impl_;
     };
 
     const DatasetBase* const input_;
@@ -423,6 +428,13 @@ class PrivateThreadPoolDatasetOp : public UnaryDatasetOpKernel {
 
     int64 Cardinality() const override { return input_->Cardinality(); }
 
+    Status InputDatasets(
+        std::vector<const DatasetBase*>* inputs) const override {
+      inputs->clear();
+      inputs->push_back(input_);
+      return Status::OK();
+    }
+
     Status CheckExternalState() const override {
       return input_->CheckExternalState();
     }
@@ -460,7 +472,6 @@ class PrivateThreadPoolDatasetOp : public UnaryDatasetOpKernel {
           pool->Schedule(std::move(c));
         };
         params.runner_threadpool_size = dataset()->num_threads_;
-        mutex_lock l(mu_);
         return input_impl_->GetNext(IteratorContext{std::move(params)},
                                     out_tensors, end_of_sequence);
       }
@@ -474,7 +485,6 @@ class PrivateThreadPoolDatasetOp : public UnaryDatasetOpKernel {
 
       Status SaveInternal(SerializationContext* ctx,
                           IteratorStateWriter* writer) override {
-        mutex_lock l(mu_);
         DCHECK(input_impl_ != nullptr);
         TF_RETURN_IF_ERROR(SaveInput(ctx, writer, input_impl_));
         return Status::OK();
@@ -482,14 +492,12 @@ class PrivateThreadPoolDatasetOp : public UnaryDatasetOpKernel {
 
       Status RestoreInternal(IteratorContext* ctx,
                              IteratorStateReader* reader) override {
-        mutex_lock l(mu_);
         TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
         return Status::OK();
       }
 
      private:
-      mutex mu_;
-      std::unique_ptr<IteratorBase> input_impl_ TF_GUARDED_BY(mu_);
+      std::unique_ptr<IteratorBase> input_impl_;
     };
 
     const DatasetBase* const input_;

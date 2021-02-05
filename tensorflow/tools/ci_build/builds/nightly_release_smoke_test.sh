@@ -18,16 +18,28 @@
 set -e
 set -x
 
-MAX_WHL_SIZE=550M
+# CPU size
+MAC_CPU_MAX_WHL_SIZE=175M
+LINUX_CPU_MAX_WHL_SIZE=152M
+WIN_CPU_MAX_WHL_SIZE=113M
+# GPU size
+LINUX_GPU_MAX_WHL_SIZE=390M
+WIN_GPU_MAX_WHL_SIZE=252M
 
 function run_smoke_test() {
-  VENV_TMP_DIR=$(mktemp -d)
 
-  ${PYTHON_BIN_PATH} -m virtualenv -p ${PYTHON_BIN_PATH} "${VENV_TMP_DIR}" || \
-      die "FAILED: Unable to create virtualenv"
+  # Upload the PIP package if whl test passes.
+  if [ ${IN_VENV} -eq 0 ]; then
+    VENV_TMP_DIR=$(mktemp -d)
 
-  source "${VENV_TMP_DIR}/bin/activate" || \
-      die "FAILED: Unable to activate virtualenv "
+    ${PYTHON_BIN_PATH} -m pip install virtualenv
+
+    ${PYTHON_BIN_PATH} -m virtualenv -p ${PYTHON_BIN_PATH} "${VENV_TMP_DIR}" || \
+        die "FAILED: Unable to create virtualenv"
+
+    source "${VENV_TMP_DIR}/bin/activate" || \
+        die "FAILED: Unable to activate virtualenv "
+  fi
 
   # install tensorflow
   python -m pip install ${WHL_NAME} || \
@@ -41,9 +53,14 @@ function run_smoke_test() {
   test_tf_whl_size
 
   RESULT=$?
-  # Deactivate from virtualenv.
-  deactivate || source deactivate || die "FAILED: Unable to deactivate from existing virtualenv."
-  sudo rm -rf "${KOKORO_GFILE_DIR}/venv"
+
+  # Upload the PIP package if whl test passes.
+  if [ ${IN_VENV} -eq 0 ]; then
+    # Deactivate from virtualenv.
+    deactivate || source deactivate || die "FAILED: Unable to deactivate from existing virtualenv."
+    sudo rm -rf "${KOKORO_GFILE_DIR}/venv"
+  fi
+
   return $RESULT
 }
 
@@ -82,10 +99,40 @@ function test_tf_imports() {
 }
 
 function test_tf_whl_size() {
-  if [[ $(find $WHL_NAME -type f -size +${MAX_WHL_SIZE}) ]]; then
-    echo "The whl size has exceeded 550MB. To keep within pypi's CDN
-distribution limit, we must not exceed that threshold."
-    return 1
+  # Check CPU whl size.
+  if [[ "$WHL_NAME" == *"_cpu"* ]]; then
+    # Check MAC CPU whl size.
+    if [[ "$WHL_NAME" == *"-macos"* ]] && [[ $(find $WHL_NAME -type f -size +${MAC_CPU_MAX_WHL_SIZE}) ]]; then
+        echo "Mac CPU whl size has exceeded ${MAC_CPU_MAX_WHL_SIZE}. To keep
+within pypi's CDN distribution limit, we must not exceed that threshold."
+      return 1
+    fi
+    # Check Linux CPU whl size.
+    if [[ "$WHL_NAME" == *"-manylinux"* ]] && [[ $(find $WHL_NAME -type f -size +${LINUX_CPU_MAX_WHL_SIZE}) ]]; then
+        echo "Linux CPU whl size has exceeded ${LINUX_CPU_MAX_WHL_SIZE}. To keep
+within pypi's CDN distribution limit, we must not exceed that threshold."
+      return 1
+    fi
+    # Check Windows CPU whl size.
+    if [[ "$WHL_NAME" == *"-win"* ]] && [[ $(find $WHL_NAME -type f -size +${WIN_CPU_MAX_WHL_SIZE}) ]]; then
+        echo "Windows CPU whl size has exceeded ${WIN_CPU_MAX_WHL_SIZE}. To keep
+within pypi's CDN distribution limit, we must not exceed that threshold."
+      return 1
+    fi
+  # Check GPU whl size
+  elif [[ "$WHL_NAME" == *"_gpu"* ]]; then
+    # Check Linux GPU whl size.
+    if [[ "$WHL_NAME" == *"-manylinux"* ]] && [[ $(find $WHL_NAME -type f -size +${LINUX_GPU_MAX_WHL_SIZE}) ]]; then
+        echo "Linux GPU whl size has exceeded ${LINUX_GPU_MAX_WHL_SIZE}. To keep
+within pypi's CDN distribution limit, we must not exceed that threshold."
+      return 1
+    fi
+    # Check Windows GPU whl size.
+    if [[ "$WHL_NAME" == *"-win"* ]] && [[ $(find $WHL_NAME -type f -size +${WIN_GPU_MAX_WHL_SIZE}) ]]; then
+        echo "Windows GPU whl size has exceeded ${WIN_GPU_MAX_WHL_SIZE}. To keep
+within pypi's CDN distribution limit, we must not exceed that threshold."
+      return 1
+    fi
   fi
 }
 
@@ -97,5 +144,6 @@ if [[ -z "${1}" ]]; then
   return 1
 fi
 
+IN_VENV=$(python -c 'import sys; print("1" if sys.version_info.major == 3 and sys.prefix != sys.base_prefix else "0")')
 WHL_NAME=${1}
 run_smoke_test
